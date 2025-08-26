@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-pydantic-settings
-pymupdf
-faiss-cpu
-llama-cpp-python
-numpy
-FlagEmbedding
