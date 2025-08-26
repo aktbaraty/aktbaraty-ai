@@ -1,37 +1,59 @@
-# backend/rag.py
+cat > backend/rag.py <<'PY'
 import json
 from pathlib import Path
-import numpy as np
+from typing import List, Dict
+
 import faiss
-from FlagEmbedding import BGEM3FlagModel
+import numpy as np
+from fastembed import TextEmbedding
 
 from settings import INDEX_PATH, META_PATH, EMB_MODEL_DIR, TOP_K
+
 
 class Retriever:
     def __init__(self, top_k: int = TOP_K):
         if not INDEX_PATH.exists() or not META_PATH.exists():
-            raise FileNotFoundError("Index or meta file not found. Run ingest.py first.")
-        self.model = BGEM3FlagModel(str(EMB_MODEL_DIR), use_fp16=True)
+            raise FileNotFoundError(
+                f"Index or meta not found. Run ingest.py first.\nINDEX_PATH={INDEX_PATH}\nMETA_PATH={META_PATH}"
+            )
+
+        # اقرأ الفهرس والميتا
         self.index = faiss.read_index(str(INDEX_PATH))
         with open(META_PATH, "r", encoding="utf-8") as f:
             self.meta = json.load(f)
+
+        # fastembed (خفيف ولا يتطلب Torch)
+        self.embedder = TextEmbedding(
+            model_name="paraphrase-multilingual-MiniLM-L12-v2",
+            cache_dir=str(EMB_MODEL_DIR)
+        )
         self.top_k = top_k
 
-    def search(self, query: str, top_k: int | None = None):
+    def search(self, query: str, top_k: int | None = None) -> List[Dict]:
         k = top_k or self.top_k
-        out = self.model.encode([query], batch_size=1, max_length=8192)
-        q = out['dense_vecs']
+        # fastembed يرجّع مولد؛ نحوّله إلى numpy
+        q = np.array(list(self.embedder.embed([query])), dtype=np.float32)
+        # L2 normalize → cosine via inner product
         q = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-12)
-        q = np.array(q, dtype=np.float32)
         scores, idxs = self.index.search(q, k)
-        results = []
+
+        hits = []
         for score, idx in zip(scores[0], idxs[0]):
             m = self.meta[int(idx)]
-            results.append({"score": float(score), **m})
-        return results
+            hits.append({
+                "score": float(score),
+                "source": m["source"],
+                "chunk_index": m["chunk_index"],
+                "text": m["text"]
+            })
+        return hits
 
-def build_prompt_ar(question: str, docs):
-    context = "\n\n".join([f"[المصدر: {d['source']} — مقطع {d['chunk_index']}]\n{d['text']}" for d in docs])
+
+def build_prompt_ar(question: str, docs: List[Dict]) -> str:
+    context = "\n\n".join(
+        f"[المصدر: {d['source']} — مقطع {d['chunk_index']}]\n{d['text']}"
+        for d in docs
+    )
     prompt = f"""أنت مساعد خبير يجيب بالعربية الفصحى باختصار ووضوح اعتمادًا على المقتطفات التالية من وثائق PDF.
 لا تخترع معلومات. إذا لم تجد الإجابة في المقتطفات، قل: لا أملك معلومات كافية من الملفات.
 أظهر المصادر المستخدمة في نهاية الإجابة.
@@ -44,3 +66,4 @@ def build_prompt_ar(question: str, docs):
 الإجابة بالعربية:
 """
     return prompt
+PY
