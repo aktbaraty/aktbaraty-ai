@@ -1,0 +1,16 @@
+{
+  "name": "Aktbaraty AI (Codespaces)",
+  "dockerFile": "Dockerfile",
+  "settings": {
+    "terminal.integrated.defaultProfile.linux": "bash"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [
+    8000,
+    8080
+  ],
+  "postCreateCommand": "bash scripts/post_create.sh",
+  "remoteUser": "vscode"
+}
